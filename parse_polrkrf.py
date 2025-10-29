@@ -3,7 +3,7 @@ import time
 import sys
 import logging
 from urllib.parse import urljoin, urlparse
-import csv
+import json
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -15,7 +15,7 @@ BASE_URL = "https://polkrf.ru"
 LIST_URL_TEMPLATE = BASE_URL + "/veterans?page={page_num}"
 PLACEHOLDER_URL = "https://polkrf.ru/assets/index/img/veteran_card_placeholder.jpg"
 IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
-METADA_FILE = "metadata.csv"
+METADATA_JSONL = "metadata.jsonl"
 
 # Polite crawling parameters
 REQUEST_TIMEOUT_SECONDS = 20
@@ -66,22 +66,22 @@ def _clean_text(text: str | None) -> str:
     return " ".join(text.split())
 
 
-def fetch_card_details(card_url: str) -> dict[str, str]:
+def fetch_card_details(card_url: str) -> dict:
     """Fetch and parse veteran card details from card_url using provided selectors.
 
     Returns a dict with keys: card_id, veteran_name, birth_date, birth_place,
     death_date, death_place, operations, biography, rewards.
     """
-    details: dict[str, str] = {
+    details: dict = {
         "card_id": extract_card_id(card_url) or "",
         "veteran_name": "",
         "birth_date": "",
         "birth_place": "",
         "death_date": "",
         "death_place": "",
-        "operations": "",
+        "operations": [],
         "biography": "",
-        "rewards": "",
+        "rewards": [],
     }
 
     try:
@@ -127,7 +127,7 @@ def fetch_card_details(card_url: str) -> dict[str, str]:
     ]
     ops = [op for op in ops if op]
     if ops:
-        details["operations"] = "; ".join(ops)
+        details["operations"] = ops
 
     # Biography paragraph
     bio_p = soup.select_one("div.b-operation__wrap p")
@@ -154,7 +154,7 @@ def fetch_card_details(card_url: str) -> dict[str, str]:
             rewards.append(_clean_text(child.get_text(" ")))
     rewards = [r for r in rewards if r]
     if rewards:
-        details["rewards"] = "; ".join(rewards)
+        details["rewards"] = rewards
 
     return details
 
@@ -305,31 +305,25 @@ def main() -> None:
     seen_urls: set[str] = set()
     page_num = 1
 
-    # Prepare metadata file header if needed
-    try:
-        need_header = (
-            not os.path.exists(METADA_FILE) or os.path.getsize(METADA_FILE) == 0
-        )
-        if need_header:
-            with open(METADA_FILE, mode="a", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f, delimiter=",")
-                writer.writerow(
-                    [
-                        "card_id",
-                        "veteran_name",
-                        "birth_date",
-                        "birth_place",
-                        "death_date",
-                        "death_place",
-                        "operations",
-                        "biography",
-                        "rewards",
-                    ]
-                )  # initial header
-    except Exception as e:
-        logger.warning("Could not initialize metadata file '%s': %s", METADA_FILE, e)
+    # JSONL append mode: write one JSON object per line as we go
 
-    while downloaded_count < MAX_IMAGES:
+    # Determine target number of images: CLI arg > env > default
+    target_max = MAX_IMAGES
+    # env override
+    env_max = os.getenv("MAX_IMAGES")
+    if env_max:
+        try:
+            target_max = max(0, int(env_max))
+        except ValueError:
+            logger.warning("Invalid MAX_IMAGES env: %s", env_max)
+    # CLI arg override
+    if len(sys.argv) > 1:
+        try:
+            target_max = max(0, int(sys.argv[1]))
+        except ValueError:
+            logger.warning("Invalid CLI num_images: %s", sys.argv[1])
+
+    while downloaded_count < target_max:
         try:
             entries = fetch_image_urls_from_page(page_num)
         except Exception as e:
@@ -341,7 +335,7 @@ def main() -> None:
 
         # If no images found, still advance to next page to avoid infinite loop
         for img_url, card_url in entries:
-            if downloaded_count >= MAX_IMAGES:
+            if downloaded_count >= target_max:
                 break
             if img_url in seen_urls:
                 logger.debug("Duplicate image URL skipped: %s", img_url)
@@ -362,32 +356,31 @@ def main() -> None:
             if download_image(img_url, card_id):
                 downloaded_count += 1
                 logger.debug("Downloaded count: %d", downloaded_count)
-                # Append metadata row
+                # Append JSON line immediately
+                record = {
+                    "card_id": details.get("card_id", ""),
+                    "veteran_name": details.get("veteran_name", ""),
+                    "birth_date": details.get("birth_date", ""),
+                    "birth_place": details.get("birth_place", ""),
+                    "death_date": details.get("death_date", ""),
+                    "death_place": details.get("death_place", ""),
+                    "operations": details.get("operations", []),
+                    "biography": details.get("biography", ""),
+                    "rewards": details.get("rewards", []),
+                }
                 try:
-                    with open(
-                        METADA_FILE, mode="a", newline="", encoding="utf-8-sig"
-                    ) as f:
-                        writer = csv.writer(f, delimiter=",")
-                        writer.writerow(
-                            [
-                                details.get("card_id", ""),
-                                details.get("veteran_name", ""),
-                                details.get("birth_date", ""),
-                                details.get("birth_place", ""),
-                                details.get("death_date", ""),
-                                details.get("death_place", ""),
-                                details.get("operations", ""),
-                                details.get("biography", ""),
-                                details.get("rewards", ""),
-                            ]
-                        )
+                    with open(METADATA_JSONL, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(record, ensure_ascii=False))
+                        f.write("\n")
                 except Exception as e:
-                    logger.warning("Failed to write metadata for %s: %s", img_url, e)
+                    logger.warning(
+                        "Failed to append JSONL metadata for %s: %s", card_id, e
+                    )
             # Always delay between requests (both page and image fetches)
             time.sleep(DELAY_BETWEEN_REQUESTS_SECONDS)
 
         # Delay before next page request
-        if downloaded_count < MAX_IMAGES:
+        if downloaded_count < target_max:
             time.sleep(DELAY_BETWEEN_REQUESTS_SECONDS)
             page_num += 1
             logger.info(
@@ -396,7 +389,6 @@ def main() -> None:
                 downloaded_count,
             )
 
-    # Optional: print a small completion message for CLI usage
     logger.info("Downloaded exactly %d images to '%s'", downloaded_count, IMAGES_DIR)
 
 
