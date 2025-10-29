@@ -1,0 +1,8 @@
+ФИO: $$('span.b-title-1__inner')[0].children[0].textContent + ' ' + $$('span.b-title-1__inner')[0].children[1].textContent
+Название заголовка (одно из: дата/место рождения/смерти): $$('div.b-text-info.b-text-info-double__item .b-text-info__name')[0].textContent.split(':')[0]
+Его содержимое: $$('div.b-text-info.b-text-info-double__item span.b-text-info__text')[0].textContent
+Список операций: $$('div.b-list.b-operation__list ul')[0].children
+Название операции i $$('div.b-list.b-operation__list ul')[0].children[i].children[0].text
+Боевой путь: $$('div.b-operation__wrap p')[0].textContent
+Список медалей: $$('div.b-medals-slider__container.embla__container')[0].children
+Название медали i: $$('div.b-medals-slider__container.embla__container')[0].children[i].children[0].children[1].textContent
