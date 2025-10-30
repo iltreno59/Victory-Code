@@ -4,6 +4,7 @@ import sys
 import logging
 from urllib.parse import urljoin, urlparse
 import json
+import argparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -19,7 +20,7 @@ METADATA_JSONL = "metadata.jsonl"
 
 # Polite crawling parameters
 REQUEST_TIMEOUT_SECONDS = 20
-DELAY_BETWEEN_REQUESTS_SECONDS = 1.5
+DELAY_BETWEEN_REQUESTS_SECONDS = 0.5
 MAX_IMAGES = 100
 
 
@@ -301,62 +302,47 @@ def download_image(url: str, out_basename: str) -> bool:
 def main() -> None:
     ensure_images_dir_exists()
 
+    parser = argparse.ArgumentParser(description="Scrape polkrf.ru veterans images & metadata.")
+    parser.add_argument("-n", "--num-images", type=int, default=MAX_IMAGES, help="Number of images/rows to collect [default: %(default)s]")
+    parser.add_argument("-s", "--start-page", type=int, default=1, help="Page number to start from [default: %(default)s]")
+    parser.add_argument("-d", "--direction", type=int, choices=[0, -1], default=0, help="Page walk direction: 0 - forward, -1 - backward [default: %(default)s]")
+    parser.add_argument("-l", "--delay", type=float, default=DELAY_BETWEEN_REQUESTS_SECONDS, help="Delay between requests, seconds [default: %(default)s]")
+    args = parser.parse_args()
+
+    target_max = max(0, args.num_images)
+    page_num = args.start_page
+    direction = -1 if args.direction == -1 else 1
+    per_request_delay = float(args.delay) if args.delay > 0 else DELAY_BETWEEN_REQUESTS_SECONDS
+    logger.info(f"Config: num_images={target_max}, start_page={page_num}, direction={'reverse' if direction==-1 else 'forward'}, delay={per_request_delay}s")
+
     downloaded_count = 0
     seen_urls: set[str] = set()
-    page_num = 1
-
-    # JSONL append mode: write one JSON object per line as we go
-
-    # Determine target number of images: CLI arg > env > default
-    target_max = MAX_IMAGES
-    # env override
-    env_max = os.getenv("MAX_IMAGES")
-    if env_max:
-        try:
-            target_max = max(0, int(env_max))
-        except ValueError:
-            logger.warning("Invalid MAX_IMAGES env: %s", env_max)
-    # CLI arg override
-    if len(sys.argv) > 1:
-        try:
-            target_max = max(0, int(sys.argv[1]))
-        except ValueError:
-            logger.warning("Invalid CLI num_images: %s", sys.argv[1])
-
     while downloaded_count < target_max:
         try:
             entries = fetch_image_urls_from_page(page_num)
         except Exception as e:
-            # If a page fails to load or parse, wait and try the next one
-            logger.warning("Failed to process page %s: %s", page_num, e)
-            time.sleep(DELAY_BETWEEN_REQUESTS_SECONDS)
-            page_num += 1
+            logger.warning(f"Failed to process page {page_num}: {e}")
+            time.sleep(per_request_delay)
+            page_num += direction
             continue
-
-        # If no images found, still advance to next page to avoid infinite loop
-        for img_url, card_url in entries:
+        for img_url, card_url in entries[::direction]:
             if downloaded_count >= target_max:
                 break
             if img_url in seen_urls:
-                logger.debug("Duplicate image URL skipped: %s", img_url)
+                logger.debug(f"Duplicate image URL skipped: {img_url}")
                 continue
             seen_urls.add(img_url)
-
             card_id = extract_card_id(card_url)
             if not card_id:
-                logger.debug("Could not extract id from card URL: %s", card_url)
-                time.sleep(DELAY_BETWEEN_REQUESTS_SECONDS)
+                logger.debug(f"Could not extract id from card URL: {card_url}")
+                time.sleep(per_request_delay)
                 continue
-
-            # Parse card details before saving metadata
             details = fetch_card_details(card_url)
             if not details.get("card_id"):
                 details["card_id"] = card_id
-
             if download_image(img_url, card_id):
                 downloaded_count += 1
-                logger.debug("Downloaded count: %d", downloaded_count)
-                # Append JSON line immediately
+                logger.debug(f"Downloaded count: {downloaded_count}")
                 record = {
                     "card_id": details.get("card_id", ""),
                     "veteran_name": details.get("veteran_name", ""),
@@ -373,23 +359,13 @@ def main() -> None:
                         f.write(json.dumps(record, ensure_ascii=False))
                         f.write("\n")
                 except Exception as e:
-                    logger.warning(
-                        "Failed to append JSONL metadata for %s: %s", card_id, e
-                    )
-            # Always delay between requests (both page and image fetches)
-            time.sleep(DELAY_BETWEEN_REQUESTS_SECONDS)
-
-        # Delay before next page request
+                    logger.warning(f"Failed to append JSONL metadata for {card_id}: {e}")
+            time.sleep(per_request_delay)
+        page_num += direction
+        logger.info(f"Proceeding to page: {page_num} (downloaded: {downloaded_count})")
         if downloaded_count < target_max:
-            time.sleep(DELAY_BETWEEN_REQUESTS_SECONDS)
-            page_num += 1
-            logger.info(
-                "Proceeding to next page: %s (downloaded: %d)",
-                page_num,
-                downloaded_count,
-            )
-
-    logger.info("Downloaded exactly %d images to '%s'", downloaded_count, IMAGES_DIR)
+            time.sleep(per_request_delay)
+    logger.info(f"Downloaded exactly {downloaded_count} images to '{IMAGES_DIR}'")
 
 
 if __name__ == "__main__":
