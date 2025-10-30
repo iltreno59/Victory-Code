@@ -51,30 +51,84 @@ python parse_polrkrf.py [опции]
 - Информация по каждому ветерану строчно добавляется в `metadata.jsonl` (UTF-8, JSONL)
 - При прерывании или сбое уже собранные строки не теряются
 
-## Работа с Docker
+## Запуск с помощью Docker
 
-1. Сборка образа (из папки с Dockerfile и parse_polrkrf.py):
-   ```bash
-   docker build -t polkrf-dataset:1.3 .
-   ```
-2. Запуск парсера, вывод: 1000 результатов, с задержкой 1с, начиная с 10-й стр., вперёд:
-   ```bash
-   docker run --rm \
-     -v "$PWD/images:/app/images" \
-     -v "$PWD/metadata.jsonl:/app/metadata.jsonl" \
-     polkrf-dataset:1.3 -n 1000 -s 10 -d 0 -l 1
-   ```
+### 1. Сборка Docker-образа
+Выполните эту команду в корне репозитория, где лежит `Dockerfile`:
 
-- Если нужны другие параметры — добавляйте их по ключам.
-- В результате изображения и jsonl окажутся в текущей директории.
+```bash
+docker build -t polkrf-dataset:1.3 .
+```
 
-### Версионирование Docker-образа
-- Каждый раз при существенных изменениях повышайте тег версии (например, `polkrf-dataset:1.4`).
-- Для загрузки на Docker Hub:
-  1. Войти: `docker login`
-  2. Пометить тег: `docker tag polkrf-dataset:1.4 username/polkrf-dataset:1.4`
-  3. Залить: `docker push username/polkrf-dataset:1.4`
-- Для запуска на другой машине используйте нужный тег версии.
+### 2. Запуск контейнера с примонтированием файлов
+
+Все результаты удобно сохранять в локальные файлы/директории (на вашем компьютере). Используйте ключ `-v` (mount volume) для папки с изображениями и файла metadata.
+
+#### Пример для Windows PowerShell:
+```powershell
+docker run --rm \
+  -v "${PWD}\images:/app/images" \
+  -v "${PWD}\metadata.jsonl:/app/metadata.jsonl" \
+  polkrf-dataset:1.3 -n 1000 -s 1 -d 0 -l 1
+```
+
+#### Пример для Linux/macOS (bash):
+```bash
+docker run --rm \
+  -v "$PWD/images:/app/images" \
+  -v "$PWD/metadata.jsonl:/app/metadata.jsonl" \
+  polkrf-dataset:1.3 -n 1000 -s 1 -d 0 -l 1
+```
+
+- Здесь:
+  - `-n 1000` — сколько изображений (можно другое число)
+  - `-s 1` — с какой страницы начать (например, `-s 10`)
+  - `-d -1` — в обратном порядке (или `-d 0` — прямой обход)
+  - `-l 0.5` — задержка между запросами (сек)
+
+### 3. Полные примеры команд
+
+- Стандартно, вперёд:
+```bash
+docker run --rm -v "$PWD/images:/app/images" -v "$PWD/metadata.jsonl:/app/metadata.jsonl" polkrf-dataset:1.3 -n 500
+```
+- Начать с 40-й страницы в обратном порядке:
+```bash
+docker run --rm -v "$PWD/images:/app/images" -v "$PWD/metadata.jsonl:/app/metadata.jsonl" polkrf-dataset:1.3 -n 200 -s 40 -d -1 -l 1.2
+```
+- Больший delay и больше данных:
+```bash
+docker run --rm -v "$PWD/images:/app/images" -v "$PWD/metadata.jsonl:/app/metadata.jsonl" polkrf-dataset:1.3 -n 2000 -l 2
+```
+
+### 4. Где искать данные
+- Все скачанные изображения будут в поддиректории `images` в вашей папке, где запускали контейнер.
+- Все метаданные — в `metadata.jsonl`, по одной записи на строку.
+
+### 5. Как обновить образ для новой версии скрипта
+- После изменений кода сборку надо повторить с новым тегом!
+```bash
+docker build -t polkrf-dataset:1.4 .
+```
+- Запуск с новым тегом:
+```bash
+docker run --rm ... polkrf-dataset:1.4 ...
+```
+
+### 6. Публикация своего образа на Docker Hub
+- Залогиньтесь: `docker login`
+- Протегируйте образ с вашим логином:
+```bash
+docker tag polkrf-dataset:1.4 yourdockerhub/polkrf-dataset:1.4
+```
+- Загрузите:
+```bash
+docker push yourdockerhub/polkrf-dataset:1.4
+```
+
+---
+
+**Совет:** для воспроизводимости всегда используйте явный тег (1.3, 1.4...) — так у вас точно не будет путаницы между версиями!
 
 ## Советы и рекомендации
 - Используйте больший delay (`--delay 1.5` или выше) чтобы не перегружать сервер.
