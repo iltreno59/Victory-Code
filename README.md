@@ -126,6 +126,46 @@ docker tag polkrf-dataset:1.4 yourdockerhub/polkrf-dataset:1.4
 docker push yourdockerhub/polkrf-dataset:1.4
 ```
 
+### 7. Запуск на другом компьютере через Docker Hub
+
+Если вы загрузили образ на Docker Hub, для запуска на другом компьютере:
+
+1. Получите образ из Docker Hub:
+   ```bash
+   docker pull yourdockerhub/polkrf-dataset:1.4
+   # или с индексом вашей версии
+   ```
+2. Убедитесь, что в вашей рабочей директории есть (или создайте):
+   - папка `images/`
+   - файл `metadata.jsonl` (или он будет создан автоматически при запуске)
+
+3. Запустите контейнер с нужными вам параметрами (например, 500 изображений, с 10-й страницы, в обратном порядке, задержка 2 сек):
+
+- Bash / Linux / macOS:
+```bash
+docker run --rm \
+  -v "$PWD/images:/app/images" \
+  -v "$PWD/metadata.jsonl:/app/metadata.jsonl" \
+  yourdockerhub/polkrf-dataset:1.4 -n 500 -s 10 -d -1 -l 2
+```
+
+- Windows PowerShell:
+```powershell
+docker run --rm `
+  -v "${PWD}\images:/app/images" `
+  -v "${PWD}\metadata.jsonl:/app/metadata.jsonl" `
+  yourdockerhub/polkrf-dataset:1.4 -n 500 -s 10 -d -1 -l 2
+```
+
+4. После завершения работы контейнера проверьте директорию:
+   - Все изображения — в папке images
+   - Все метаданные — в файле metadata.jsonl
+
+> **Важно:**
+> - Для новой версии просто выполните `docker pull yourdockerhub/polkrf-dataset:<новый_тег>` и используйте его имя в запуске.
+> - Параметры командной строки и использование полностью такие же, как при локальном запуске — только используйте ваш remote-образ.
+> - Не забудьте заранее смонтировать output-файлы/директории!
+
 ---
 
 **Совет:** для воспроизводимости всегда используйте явный тег (1.3, 1.4...) — так у вас точно не будет путаницы между версиями!
